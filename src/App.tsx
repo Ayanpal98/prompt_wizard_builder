@@ -17,7 +17,9 @@ import {
   Settings,
   Plus,
   Sliders,
-  Save
+  Save,
+  Map,
+  Compass
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -64,7 +66,8 @@ const STEPS = [
     why: "Every LLM response is shaped by an implicit speaker. Without a role, the model defaults to a generic assistant voice — shallow, hedged, and imprecise. When you define a role, you activate a specific slice of the model's knowledge and set the appropriate confidence level, vocabulary, and depth. Google's internal prompt guidelines list role definition as the single highest-leverage change for output quality.",
     example: "You are a senior backend engineer with 12 years of experience in distributed systems, specialising in Node.js and PostgreSQL.",
     placeholder: "You are a [job title / expert type] with [X years] of experience in [domain]...",
-    chips: ['Senior software engineer', 'ML engineer (Python)', 'DevOps specialist', 'API architect', 'Security researcher']
+    chips: ['Senior software engineer', 'ML engineer (Python)', 'DevOps specialist', 'API architect', 'Security researcher'],
+    roadmapTip: "Think of this as 'setting the stage'. A specific role unlocks expert-level vocabulary and reasoning patterns."
   },
   {
     id: "context",
@@ -74,7 +77,8 @@ const STEPS = [
     why: "Context is the information the model cannot infer from the task alone. Without it, the model fills gaps with generic assumptions — often wrong ones. Good context answers three questions: Who is the audience? What is the situation? What is the goal? Anthropic's prompt engineering research shows that context depth is the strongest predictor of output relevance.",
     example: "The user is a non-technical startup founder preparing for a Series A pitch. They have limited time and need to understand technical trade-offs without jargon.",
     placeholder: "The user is a [audience]. The situation is [background]. The goal is [purpose]...",
-    chips: ['The user is a developer', 'The codebase uses Node.js', 'Target audience is non-technical', 'Production environment']
+    chips: ['The user is a developer', 'The codebase uses Node.js', 'Target audience is non-technical', 'Production environment'],
+    roadmapTip: "Answer: Who is this for? Why are we doing this? What is the starting point?"
   },
   {
     id: "task",
@@ -84,7 +88,8 @@ const STEPS = [
     why: "The task instruction must start with an action verb — Analyse, Write, Compare, Extract, Classify, Summarise. Vague verbs like 'help with' or 'talk about' produce vague output. OpenAI's red-teaming team found that prompts with a single, specific primary instruction outperform multi-instruction prompts by ~40% on task completion.",
     example: "Review the following API design and identify the top 3 architectural weaknesses. For each, explain the risk and suggest a concrete fix.",
     placeholder: "[Action verb] the following [object] and [specific outcome]...",
-    chips: ['Analyse and identify issues', 'Write a code review', 'Compare two approaches', 'Generate a test suite', 'Refactor for readability']
+    chips: ['Analyse and identify issues', 'Write a code review', 'Compare two approaches', 'Generate a test suite', 'Refactor for readability'],
+    roadmapTip: "Start with a strong verb. Be singular in focus. What is the one thing the model MUST achieve?"
   },
   {
     id: "format",
@@ -94,7 +99,8 @@ const STEPS = [
     why: "Without a format instruction, the model chooses its own structure — which may be completely incompatible with how you plan to use the output. If you are parsing the response in code, you need JSON. If a human reads it, you need headings and bullets. Microsoft's Prompt Engineering Guide notes that output format is the most commonly forgotten dimension.",
     example: "Respond as a JSON array. Each item should have: 'issue' (string), 'risk_level' (low/medium/high), and 'fix' (string). No explanation outside the JSON.",
     placeholder: "Respond as [format]. Structure your output as [shape]. Keep it under [X] words...",
-    chips: ['Respond as JSON', 'Use numbered list', 'Plain prose, no markdown', 'Structured report with headings', 'Under 200 words']
+    chips: ['Respond as JSON', 'Use numbered list', 'Plain prose, no markdown', 'Structured report with headings', 'Under 200 words'],
+    roadmapTip: "Visualise the result. Do you need a table? JSON? A bulleted list? Be explicit about the structure."
   },
   {
     id: "constraints",
@@ -104,7 +110,8 @@ const STEPS = [
     why: "Constraints are the difference between a well-engineered prompt and a wish. Every model has default behaviours — adding caveats, repeating the question, using hedging language, generating more than asked. Constraints override those defaults explicitly. Anthropic's research shows that prompts with 2–4 explicit 'do not' constraints degrade significantly less across model versions.",
     example: "Do not repeat the question. Do not add caveats or disclaimers. Do not suggest further reading. If uncertain, say 'unclear' — do not guess.",
     placeholder: "Do not [X]. Avoid [Y]. Only [Z]. If [condition], then [instruction]...",
-    chips: ['Do not repeat the question', 'Avoid jargon', 'No caveats or disclaimers', 'If uncertain, say so', 'One finding per point']
+    chips: ['Do not repeat the question', 'Avoid jargon', 'No caveats or disclaimers', 'If uncertain, say so', 'One finding per point'],
+    roadmapTip: "Set boundaries. What are the 'no-go' zones? This prevents generic AI 'fluff' and hedging."
   },
   {
     id: "example",
@@ -114,7 +121,8 @@ const STEPS = [
     why: "This is called one-shot prompting — one of the most well-studied techniques in LLM research. Showing a single example of desired output reduces format errors by ~60% and dramatically improves tone consistency. For developers building AI pipelines, this is how you enforce an output contract without fine-tuning.",
     example: "Example output:\n[{\"issue\": \"No rate limiting on auth endpoint\", \"risk_level\": \"high\", \"fix\": \"Add token bucket algorithm with 10 req/min per IP\"}]",
     placeholder: "Example output:\n[paste what a perfect response would look like here]",
-    chips: []
+    chips: [],
+    roadmapTip: "Show, don't just tell. A single sample output is worth 100 words of instruction."
   }
 ];
 
@@ -133,7 +141,7 @@ const getSystemInstruction = (dimensions: Dimension[]) => {
     let extra = "";
     if (d.id === "context_depth") extra = " For 'context_depth_rationale', specifically include examples of missing context (e.g., audience, background, or goal) that led to the score if it's not a perfect 100.";
     if (d.id === "output_framing") extra = " For 'output_framing_rationale', include specific examples of how the format was or was not clearly defined (e.g., JSON, markdown, length) and the impact on the score.";
-    return `For '${d.id}', also provide a short "rationale" (10-15 words) explaining why that score was given.${extra}`;
+    return `For '${d.id}', also provide a detailed "rationale" (20-30 words) explaining exactly why that score was given, highlighting both strengths and specific areas for improvement.${extra}`;
   }).join('\n');
 
   const jsonShape: Record<string, any> = {
@@ -198,6 +206,7 @@ export default function App() {
   const [historyTab, setHistoryTab] = useState<"history" | "library">("history");
   const [dimensions, setDimensions] = useState<Dimension[]>(DEFAULT_DIMENSIONS);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRoadmap, setShowRoadmap] = useState(true);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem("promptcraft_history");
@@ -415,6 +424,12 @@ export default function App() {
 
         <div className="flex items-center gap-4">
           <button 
+            onClick={() => setShowRoadmap(!showRoadmap)}
+            className={`font-mono text-[11px] border rounded-md px-3 py-1.5 transition-all flex items-center gap-2 ${showRoadmap ? "bg-pc-accent/10 border-pc-accent text-pc-accent" : "text-pc-hint border-pc-border hover:border-pc-border2 hover:text-pc-muted"}`}
+          >
+            <Map size={14} /> roadmap
+          </button>
+          <button 
             onClick={() => setShowSettings(true)}
             className="font-mono text-[11px] text-pc-hint border border-pc-border rounded-md px-3 py-1.5 hover:border-pc-border2 hover:text-pc-muted transition-all flex items-center gap-2"
           >
@@ -448,9 +463,102 @@ export default function App() {
       </div>
 
       {/* MAIN */}
-      <div className="w-full max-w-[1100px] grid grid-cols-1 lg:grid-cols-[1fr_380px] flex-1 min-h-[calc(100vh-73px)]">
+      <div className={`w-full max-w-[1200px] grid grid-cols-1 ${showRoadmap ? "lg:grid-cols-[220px_1fr_380px]" : "lg:grid-cols-[1fr_380px]"} flex-1 min-h-[calc(100vh-73px)] transition-all duration-300`}>
         
-        {/* LEFT: WIZARD */}
+        {/* LEFT SIDEBAR: ROADMAP */}
+        {showRoadmap && (
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="hidden lg:flex flex-col p-8 border-r border-pc-border bg-pc-bg2/50"
+          >
+            <div className="flex items-center gap-2 mb-8">
+              <Compass size={16} className="text-pc-accent" />
+              <h3 className="font-bold text-[11px] tracking-[0.2em] uppercase text-pc-text">Roadmap</h3>
+            </div>
+            
+            <div className="relative space-y-10">
+              {/* Vertical Connector */}
+              <div className="absolute left-[11px] top-2 bottom-2 w-[1px] bg-pc-border2" />
+              
+              {STEPS.map((s, i) => {
+                const isCompleted = !!promptData[s.id as keyof PromptData];
+                const isActive = i === currentStep;
+                const isPast = i < currentStep;
+                
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setCurrentStep(i)}
+                    className="relative flex items-start gap-4 group text-left w-full"
+                  >
+                    <div className={`relative z-10 w-6 h-6 rounded-full border flex items-center justify-center transition-all duration-300 ${
+                      isActive ? "bg-pc-accent border-pc-accent shadow-[0_0_15px_rgba(99,91,255,0.4)]" : 
+                      isPast || isCompleted ? "bg-pc-accent2 border-pc-accent2" : 
+                      "bg-pc-bg border-pc-border2 group-hover:border-pc-muted"
+                    }`}>
+                      {isPast || isCompleted ? (
+                        <CheckCircle size={12} className="text-pc-bg" />
+                      ) : (
+                        <span className={`text-[9px] font-bold font-mono ${isActive ? "text-white" : "text-pc-hint"}`}>
+                          0{i + 1}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-col gap-0.5 flex-1">
+                      <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                        isActive ? "text-pc-accent" : 
+                        isPast || isCompleted ? "text-pc-text" : 
+                        "text-pc-hint group-hover:text-pc-muted"
+                      }`}>
+                        {s.id}
+                      </span>
+                      <span className={`text-[9px] font-mono leading-tight transition-colors ${
+                        isActive ? "text-pc-muted" : "text-pc-hint"
+                      }`}>
+                        {s.title}
+                      </span>
+
+                      {isActive && (
+                        <motion.div 
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          className="overflow-hidden"
+                        >
+                          <p className="text-[8px] text-pc-hint mt-2 leading-relaxed border-l border-pc-border2 pl-2">
+                            {s.subtitle}
+                          </p>
+                          <div className="mt-2 bg-pc-bg border border-pc-border2 rounded p-2">
+                             <span className="text-[7px] uppercase font-bold text-pc-accent block mb-1">Quick Example</span>
+                             <span className="text-[8px] text-pc-muted font-mono line-clamp-3 italic leading-normal">
+                               {s.example.length > 80 ? s.example.substring(0, 80) + "..." : s.example}
+                             </span>
+                          </div>
+                        </motion.div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-auto pt-8">
+              <div className="bg-pc-bg3 border border-pc-border2 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap size={14} className="text-pc-amber" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-pc-text">Pro Tip</span>
+                </div>
+                <p className="text-[10px] text-pc-hint font-mono leading-relaxed">
+                  {(step as any).roadmapTip || step.why.split('.')[0] + '.'}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* CENTER: WIZARD */}
         <div className="p-10 lg:border-r border-pc-border flex flex-col">
           <AnimatePresence mode="wait">
             <motion.div
@@ -643,9 +751,12 @@ export default function App() {
                           className={`h-full rounded-full ${getBarColor(result[dim.id] as number)}`}
                         />
                       </div>
-                      <p className="text-[10px] text-pc-hint font-mono leading-tight italic">
-                        {result[`${dim.id}_rationale`]}
-                      </p>
+                      <div className="bg-pc-bg4/30 rounded p-2 mt-1">
+                        <div className="text-[9px] font-bold text-pc-hint uppercase tracking-wider mb-1">Feedback</div>
+                        <p className="text-[11px] text-pc-muted font-mono leading-relaxed">
+                          {result[`${dim.id}_rationale`]}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
