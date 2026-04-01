@@ -19,9 +19,17 @@ import {
   Sliders,
   Save,
   Map,
-  Compass
+  Compass,
+  Play,
+  Terminal,
+  Variable,
+  Layers,
+  HelpCircle,
+  Copy,
+  RotateCcw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import * as Diff from "diff";
 
 // --- Types ---
 interface Dimension {
@@ -46,6 +54,13 @@ interface HistoryItem {
   promptData: PromptData;
   result: EvaluationResult;
   dimensions: Dimension[];
+  versions?: { 
+    id: string;
+    timestamp: number; 
+    promptData: PromptData; 
+    result: EvaluationResult;
+    dimensions: Dimension[];
+  }[];
 }
 
 interface PromptData {
@@ -55,6 +70,29 @@ interface PromptData {
   format: string;
   constraints: string;
   example: string;
+}
+
+interface PromptTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  data: PromptData;
+  versions?: {
+    id: string;
+    timestamp: number;
+    data: PromptData;
+  }[];
+}
+
+interface TestCase {
+  id: string;
+  variables: Record<string, string>;
+  expectedOutput: string;
+  output: string;
+  showDiff: boolean;
+  isLoading: boolean;
+  error: string | null;
 }
 
 const STEPS = [
@@ -123,6 +161,65 @@ const STEPS = [
     placeholder: "Example output:\n[paste what a perfect response would look like here]",
     chips: [],
     roadmapTip: "Show, don't just tell. A single sample output is worth 100 words of instruction."
+  }
+];
+
+const PREDEFINED_TEMPLATES: PromptTemplate[] = [
+  {
+    id: "summarization",
+    name: "Executive Summariser",
+    description: "Condense complex documents into actionable executive summaries.",
+    category: "General",
+    data: {
+      role: "You are a Chief of Staff at a Fortune 500 company, known for your ability to distill complex information into brief, high-impact executive summaries.",
+      context: "The user is a busy CEO who needs to understand the core message, key risks, and required actions from a long report or meeting transcript.",
+      task: "Summarise the provided text into a 3-part executive brief.",
+      format: "Use three sections: 1. Core Message (1 sentence), 2. Key Insights (3-5 bullets), 3. Required Actions (numbered list). Total length under 250 words.",
+      constraints: "Do not use corporate jargon. Do not repeat the input. Avoid passive voice. If the input is missing actionable data, state 'No clear actions identified'.",
+      example: "Core Message: The Q3 expansion into APAC is delayed by 4 weeks due to regulatory hurdles in Singapore.\n\nKey Insights:\n- Licensing approval is pending final audit.\n- Budget remains within 5% of forecast.\n- Local hiring is 80% complete.\n\nRequired Actions:\n1. Approve the revised timeline.\n2. Schedule a follow-up with the Singapore legal team."
+    }
+  },
+  {
+    id: "code-gen",
+    name: "Clean Code Architect",
+    description: "Generate production-ready, well-documented code following best practices.",
+    category: "Coding",
+    data: {
+      role: "You are a Principal Software Engineer and Clean Code advocate. You prioritise readability, maintainability, and robust error handling.",
+      context: "The user is building a scalable web application and needs a specific component or function implemented using modern industry standards.",
+      task: "Write a high-quality implementation for the requested feature.",
+      format: "Provide the code in a single block. Use clear variable names and JSDoc comments. Include a brief 'Implementation Notes' section at the end.",
+      constraints: "Do not provide conversational filler. Do not use deprecated libraries. Ensure the code is type-safe. If the request is ambiguous, add a comment explaining your assumptions.",
+      example: "/**\n * Calculates the Fibonacci sequence up to n.\n * @param {number} n - The number of elements.\n * @returns {number[]} The sequence.\n */\nfunction fib(n) { ... }"
+    }
+  },
+  {
+    id: "creative-writing",
+    name: "Narrative Architect",
+    description: "Craft compelling stories with rich character development and atmosphere.",
+    category: "Writing",
+    data: {
+      role: "You are an award-winning novelist known for atmospheric prose and deep psychological character studies.",
+      context: "The user provides a prompt or a scene idea and wants a high-quality narrative expansion that feels immersive and emotionally resonant.",
+      task: "Write a compelling scene based on the provided prompt.",
+      format: "Use standard literary prose. Focus on sensory details (sight, sound, smell). Keep the length between 400-600 words.",
+      constraints: "Show, don't tell. Avoid cliches. Do not use adverbs where a stronger verb would suffice. Ensure the dialogue feels natural and subtext-heavy.",
+      example: "The rain didn't just fall; it reclaimed the city. Elias stood at the window, the glass cold against his forehead..."
+    }
+  },
+  {
+    id: "data-extraction",
+    name: "Structured Data Extractor",
+    description: "Extract specific entities and relationships into clean JSON format.",
+    category: "Data",
+    data: {
+      role: "You are a precision data extraction engine designed to convert unstructured text into valid, schema-compliant JSON.",
+      context: "The user has a collection of raw text (emails, invoices, articles) and needs specific data points extracted for a database.",
+      task: "Extract the requested entities from the provided text.",
+      format: "Respond ONLY with a valid JSON object. Do not include markdown code blocks or any text before/after the JSON.",
+      constraints: "If a field is missing, use null. Do not guess or hallucinate data. Ensure all dates are in ISO 8601 format.",
+      example: "{\n  \"name\": \"John Doe\",\n  \"amount\": 150.00,\n  \"date\": \"2024-03-15\"\n}"
+    }
   }
 ];
 
@@ -207,11 +304,21 @@ export default function App() {
   const [dimensions, setDimensions] = useState<Dimension[]>(DEFAULT_DIMENSIONS);
   const [showSettings, setShowSettings] = useState(false);
   const [showRoadmap, setShowRoadmap] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
+  const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([]);
+  const [view, setView] = useState<"builder" | "tester">("builder");
+  const [testCases, setTestCases] = useState<TestCase[]>([
+    { id: crypto.randomUUID(), variables: {}, expectedOutput: "", output: "", showDiff: true, isLoading: false, error: null }
+  ]);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem("promptcraft_history");
     const savedLibrary = localStorage.getItem("promptcraft_library");
     const savedDimensions = localStorage.getItem("promptcraft_dimensions");
+    const savedCustomTemplates = localStorage.getItem("promptcraft_custom_templates");
     
     if (savedHistory) {
       try {
@@ -225,6 +332,13 @@ export default function App() {
         setSavedItems(JSON.parse(savedLibrary));
       } catch (e) {
         console.error("Failed to parse library", e);
+      }
+    }
+    if (savedCustomTemplates) {
+      try {
+        setCustomTemplates(JSON.parse(savedCustomTemplates));
+      } catch (e) {
+        console.error("Failed to parse custom templates", e);
       }
     }
     if (savedDimensions) {
@@ -251,6 +365,36 @@ export default function App() {
 
   const saveToLibrary = () => {
     if (!result) return;
+
+    if (activeItemId && activeItemType === "library") {
+      const existingIndex = savedItems.findIndex(i => i.id === activeItemId);
+      if (existingIndex !== -1) {
+        const existing = savedItems[existingIndex];
+        const oldVersion = {
+          id: crypto.randomUUID(),
+          timestamp: existing.timestamp,
+          promptData: existing.promptData,
+          result: existing.result,
+          dimensions: existing.dimensions
+        };
+        
+        const updatedItem: HistoryItem = {
+          ...existing,
+          timestamp: Date.now(),
+          promptData: { ...promptData },
+          result: result,
+          dimensions: [...dimensions],
+          versions: [oldVersion, ...(existing.versions || [])].slice(0, 10) // Keep last 10 versions
+        };
+        
+        const updated = [...savedItems];
+        updated[existingIndex] = updatedItem;
+        setSavedItems(updated);
+        localStorage.setItem("promptcraft_library", JSON.stringify(updated));
+        return;
+      }
+    }
+
     const newItem: HistoryItem = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
@@ -261,6 +405,8 @@ export default function App() {
     const updated = [newItem, ...savedItems];
     setSavedItems(updated);
     localStorage.setItem("promptcraft_library", JSON.stringify(updated));
+    setActiveItemId(newItem.id);
+    setActiveItemType("library");
   };
 
   const deleteHistoryItem = (id: string, e: React.MouseEvent, type: "history" | "library") => {
@@ -276,14 +422,74 @@ export default function App() {
     }
   };
 
-  const loadHistoryItem = (item: HistoryItem) => {
-    setPromptData(item.promptData);
-    setResult(item.result);
+  const loadHistoryItem = (item: any, type: "history" | "library" | "template") => {
+    const data = item.promptData || item.data;
+    if (!data) return;
+    
+    setPromptData(data);
+    setActiveItemId(item.id);
+    setActiveItemType(type);
+
+    if ('result' in item && item.result) {
+      setResult(item.result);
+      setCurrentStep(STEPS.length - 1);
+    } else {
+      setResult(null);
+      setCurrentStep(0);
+    }
     if (item.dimensions) {
       setDimensions(item.dimensions);
     }
     setShowHistory(false);
-    setCurrentStep(STEPS.length - 1);
+    setShowTemplates(false);
+  };
+
+  const saveAsTemplate = (name: string, description: string) => {
+    if (activeItemId && activeItemType === "template") {
+      const existingIndex = customTemplates.findIndex(t => t.id === activeItemId);
+      if (existingIndex !== -1) {
+        const existing = customTemplates[existingIndex];
+        const oldVersion = {
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          data: existing.data
+        };
+        
+        const updatedTemplate: PromptTemplate = {
+          ...existing,
+          name,
+          description,
+          data: { ...promptData },
+          versions: [oldVersion, ...(existing.versions || [])].slice(0, 10)
+        };
+        
+        const updated = [...customTemplates];
+        updated[existingIndex] = updatedTemplate;
+        setCustomTemplates(updated);
+        localStorage.setItem("promptcraft_custom_templates", JSON.stringify(updated));
+        return;
+      }
+    }
+
+    const newTemplate: PromptTemplate = {
+      id: crypto.randomUUID(),
+      name,
+      description,
+      category: "General",
+      data: { ...promptData }
+    };
+    const updated = [...customTemplates, newTemplate];
+    setCustomTemplates(updated);
+    localStorage.setItem("promptcraft_custom_templates", JSON.stringify(updated));
+    setActiveItemId(newTemplate.id);
+    setActiveItemType("template");
+  };
+
+  const deleteCustomTemplate = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = customTemplates.filter(t => t.id !== id);
+    setCustomTemplates(updated);
+    localStorage.setItem("promptcraft_custom_templates", JSON.stringify(updated));
   };
 
   const handleInputChange = (field: keyof PromptData, value: string) => {
@@ -383,6 +589,8 @@ export default function App() {
       setCurrentStep(0);
       setResult(null);
       setError(null);
+      setActiveItemId(null);
+      setActiveItemType(null);
     }
   };
 
@@ -399,7 +607,93 @@ export default function App() {
     return "bg-pc-red";
   };
 
+  const detectVariables = (text: string) => {
+    const regex = /\{\{(.*?)\}\}/g;
+    const matches = text.match(regex);
+    if (!matches) return [];
+    return [...new Set(matches.map(m => m.replace(/\{\{|\}\}/g, "").trim()))];
+  };
+
+  const runTest = async (testCaseId: string) => {
+    const fullPrompt = buildFullPrompt();
+    const variables = detectVariables(fullPrompt);
+    const testCase = testCases.find(tc => tc.id === testCaseId);
+    if (!testCase) return;
+
+    setTestCases(prev => prev.map(tc => tc.id === testCaseId ? { ...tc, isLoading: true, error: null } : tc));
+
+    let finalPrompt = fullPrompt;
+    variables.forEach(v => {
+      const val = testCase.variables[v] || `[${v}]`;
+      finalPrompt = finalPrompt.replace(new RegExp(`\\{\\{\\s*${v}\\s*\\}\\}`, 'g'), val);
+    });
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: finalPrompt }] }],
+      });
+
+      const text = response.text;
+      setTestCases(prev => prev.map(tc => tc.id === testCaseId ? { ...tc, output: text || "", isLoading: false } : tc));
+    } catch (err: any) {
+      console.error("Test error:", err);
+      setTestCases(prev => prev.map(tc => tc.id === testCaseId ? { ...tc, error: err.message || "Execution failed", isLoading: false } : tc));
+    }
+  };
+
+  const addTestCase = () => {
+    setTestCases(prev => [...prev, { id: crypto.randomUUID(), variables: {}, expectedOutput: "", output: "", showDiff: true, isLoading: false, error: null }]);
+  };
+
+  const removeTestCase = (id: string) => {
+    if (testCases.length <= 1) return;
+    setTestCases(prev => prev.filter(tc => tc.id !== id));
+  };
+
+  const updateTestCaseVariable = (id: string, variable: string, value: string) => {
+    setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, variables: { ...tc.variables, [variable]: value } } : tc));
+  };
+
+  const updateTestCaseExpected = (id: string, value: string) => {
+    setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, expectedOutput: value } : tc));
+  };
+
+  const toggleTestCaseDiff = (id: string) => {
+    setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, showDiff: !tc.showDiff } : tc));
+  };
+
+  const runAllTests = async () => {
+    const activeTests = testCases.filter(tc => !tc.isLoading);
+    await Promise.all(activeTests.map(tc => runTest(tc.id)));
+  };
+
   const step = STEPS[currentStep];
+
+  const DiffViewer = ({ expected, actual }: { expected: string; actual: string }) => {
+    if (!actual) return null;
+    if (!expected) return <div className="whitespace-pre-wrap">{actual}</div>;
+
+    const diff = Diff.diffWordsWithSpace(expected, actual);
+
+    return (
+      <div className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed">
+        {diff.map((part, index) => {
+          const color = part.added 
+            ? 'bg-pc-accent2/20 text-pc-accent2' 
+            : part.removed 
+              ? 'bg-pc-red/20 text-pc-red line-through' 
+              : 'text-pc-text';
+          return (
+            <span key={index} className={color}>
+              {part.value}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen flex flex-col items-center selection:bg-pc-accent selection:text-white">
@@ -410,16 +704,18 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-1.5">
-          {STEPS.map((_, i) => (
-            <div 
-              key={i}
-              className={`h-2 rounded-full transition-all duration-300 border border-pc-border2 ${
-                i < currentStep ? "w-2 bg-pc-accent2 border-pc-accent2" : 
-                i === currentStep ? "w-[22px] bg-pc-accent border-pc-accent" : 
-                "w-2 bg-pc-bg4"
-              }`}
-            />
-          ))}
+          <button 
+            onClick={() => setView("builder")}
+            className={`px-4 py-1.5 rounded-lg font-mono text-[11px] transition-all flex items-center gap-2 ${view === "builder" ? "bg-pc-accent text-white shadow-lg" : "text-pc-hint hover:text-pc-muted"}`}
+          >
+            <Layers size={14} /> builder
+          </button>
+          <button 
+            onClick={() => setView("tester")}
+            className={`px-4 py-1.5 rounded-lg font-mono text-[11px] transition-all flex items-center gap-2 ${view === "tester" ? "bg-pc-accent text-white shadow-lg" : "text-pc-hint hover:text-pc-muted"}`}
+          >
+            <Terminal size={14} /> tester
+          </button>
         </div>
 
         <div className="flex items-center gap-4">
@@ -454,6 +750,18 @@ export default function App() {
             <Bookmark size={14} /> library
           </button>
           <button 
+            onClick={() => setShowTemplates(true)}
+            className="font-mono text-[11px] text-pc-hint border border-pc-border rounded-md px-3 py-1.5 hover:border-pc-border2 hover:text-pc-muted transition-all flex items-center gap-2"
+          >
+            <Zap size={14} /> templates
+          </button>
+          <button 
+            onClick={() => setShowManual(true)}
+            className="font-mono text-[11px] text-pc-hint border border-pc-border rounded-md px-3 py-1.5 hover:border-pc-border2 hover:text-pc-muted transition-all flex items-center gap-2"
+          >
+            <HelpCircle size={14} /> guide
+          </button>
+          <button 
             onClick={resetWizard}
             className="font-mono text-[11px] text-pc-hint border border-pc-border rounded-md px-3 py-1.5 hover:border-pc-border2 hover:text-pc-muted transition-all"
           >
@@ -463,325 +771,536 @@ export default function App() {
       </div>
 
       {/* MAIN */}
-      <div className={`w-full max-w-[1200px] grid grid-cols-1 ${showRoadmap ? "lg:grid-cols-[220px_1fr_380px]" : "lg:grid-cols-[1fr_380px]"} flex-1 min-h-[calc(100vh-73px)] transition-all duration-300`}>
-        
-        {/* LEFT SIDEBAR: ROADMAP */}
-        {showRoadmap && (
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="hidden lg:flex flex-col p-8 border-r border-pc-border bg-pc-bg2/50"
-          >
-            <div className="flex items-center gap-2 mb-8">
-              <Compass size={16} className="text-pc-accent" />
-              <h3 className="font-bold text-[11px] tracking-[0.2em] uppercase text-pc-text">Roadmap</h3>
-            </div>
-            
-            <div className="relative space-y-10">
-              {/* Vertical Connector */}
-              <div className="absolute left-[11px] top-2 bottom-2 w-[1px] bg-pc-border2" />
-              
-              {STEPS.map((s, i) => {
-                const isCompleted = !!promptData[s.id as keyof PromptData];
-                const isActive = i === currentStep;
-                const isPast = i < currentStep;
-                
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => setCurrentStep(i)}
-                    className="relative flex items-start gap-4 group text-left w-full"
-                  >
-                    <div className={`relative z-10 w-6 h-6 rounded-full border flex items-center justify-center transition-all duration-300 ${
-                      isActive ? "bg-pc-accent border-pc-accent shadow-[0_0_15px_rgba(99,91,255,0.4)]" : 
-                      isPast || isCompleted ? "bg-pc-accent2 border-pc-accent2" : 
-                      "bg-pc-bg border-pc-border2 group-hover:border-pc-muted"
-                    }`}>
-                      {isPast || isCompleted ? (
-                        <CheckCircle size={12} className="text-pc-bg" />
-                      ) : (
-                        <span className={`text-[9px] font-bold font-mono ${isActive ? "text-white" : "text-pc-hint"}`}>
-                          0{i + 1}
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div className="flex flex-col gap-0.5 flex-1">
-                      <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${
-                        isActive ? "text-pc-accent" : 
-                        isPast || isCompleted ? "text-pc-text" : 
-                        "text-pc-hint group-hover:text-pc-muted"
-                      }`}>
-                        {s.id}
-                      </span>
-                      <span className={`text-[9px] font-mono leading-tight transition-colors ${
-                        isActive ? "text-pc-muted" : "text-pc-hint"
-                      }`}>
-                        {s.title}
-                      </span>
-
-                      {isActive && (
-                        <motion.div 
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          className="overflow-hidden"
-                        >
-                          <p className="text-[8px] text-pc-hint mt-2 leading-relaxed border-l border-pc-border2 pl-2">
-                            {s.subtitle}
-                          </p>
-                          <div className="mt-2 bg-pc-bg border border-pc-border2 rounded p-2">
-                             <span className="text-[7px] uppercase font-bold text-pc-accent block mb-1">Quick Example</span>
-                             <span className="text-[8px] text-pc-muted font-mono line-clamp-3 italic leading-normal">
-                               {s.example.length > 80 ? s.example.substring(0, 80) + "..." : s.example}
-                             </span>
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-auto pt-8">
-              <div className="bg-pc-bg3 border border-pc-border2 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap size={14} className="text-pc-amber" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-pc-text">Pro Tip</span>
+      <div className={`w-full max-w-[1200px] flex-1 min-h-[calc(100vh-73px)] transition-all duration-300`}>
+        {view === "builder" ? (
+          <div className={`grid grid-cols-1 ${showRoadmap ? "lg:grid-cols-[220px_1fr_380px]" : "lg:grid-cols-[1fr_380px]"} h-full`}>
+            {/* LEFT SIDEBAR: ROADMAP */}
+            {showRoadmap && (
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="hidden lg:flex flex-col p-8 border-r border-pc-border bg-pc-bg2/50"
+              >
+                <div className="flex items-center gap-2 mb-8">
+                  <Compass size={16} className="text-pc-accent" />
+                  <h3 className="font-bold text-[11px] tracking-[0.2em] uppercase text-pc-text">Roadmap</h3>
                 </div>
-                <p className="text-[10px] text-pc-hint font-mono leading-relaxed">
-                  {(step as any).roadmapTip || step.why.split('.')[0] + '.'}
+                
+                <div className="relative space-y-10">
+                  {/* Vertical Connector */}
+                  <div className="absolute left-[11px] top-2 bottom-2 w-[1px] bg-pc-border2" />
+                  
+                  {STEPS.map((s, i) => {
+                    const isCompleted = !!promptData[s.id as keyof PromptData];
+                    const isActive = i === currentStep;
+                    const isPast = i < currentStep;
+                    
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setCurrentStep(i)}
+                        className="relative flex items-start gap-4 group text-left w-full"
+                      >
+                        <div className={`relative z-10 w-6 h-6 rounded-full border flex items-center justify-center transition-all duration-300 ${
+                          isActive ? "bg-pc-accent border-pc-accent shadow-[0_0_15px_rgba(99,91,255,0.4)]" : 
+                          isPast || isCompleted ? "bg-pc-accent2 border-pc-accent2" : 
+                          "bg-pc-bg border-pc-border2 group-hover:border-pc-muted"
+                        }`}>
+                          {isPast || isCompleted ? (
+                            <CheckCircle size={12} className="text-pc-bg" />
+                          ) : (
+                            <span className={`text-[9px] font-bold font-mono ${isActive ? "text-white" : "text-pc-hint"}`}>
+                              0{i + 1}
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="flex flex-col gap-0.5 flex-1">
+                          <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                            isActive ? "text-pc-accent" : 
+                            isPast || isCompleted ? "text-pc-text" : 
+                            "text-pc-hint group-hover:text-pc-muted"
+                          }`}>
+                            {s.id}
+                          </span>
+                          <span className={`text-[9px] font-mono leading-tight transition-colors ${
+                            isActive ? "text-pc-muted" : "text-pc-hint"
+                          }`}>
+                            {s.title}
+                          </span>
+
+                          {isActive && (
+                            <motion.div 
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              className="overflow-hidden"
+                            >
+                              <p className="text-[8px] text-pc-hint mt-2 leading-relaxed border-l border-pc-border2 pl-2">
+                                {s.subtitle}
+                              </p>
+                              <div className="mt-2 bg-pc-bg border border-pc-border2 rounded p-2">
+                                 <span className="text-[7px] uppercase font-bold text-pc-accent block mb-1">Quick Example</span>
+                                 <span className="text-[8px] text-pc-muted font-mono line-clamp-3 italic leading-normal">
+                                   {s.example.length > 80 ? s.example.substring(0, 80) + "..." : s.example}
+                                 </span>
+                              </div>
+                            </motion.div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-auto pt-8">
+                  <div className="bg-pc-bg3 border border-pc-border2 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Zap size={14} className="text-pc-amber" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-pc-text">Pro Tip</span>
+                    </div>
+                    <p className="text-[10px] text-pc-hint font-mono leading-relaxed">
+                      {(step as any).roadmapTip || step.why.split('.')[0] + '.'}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* CENTER: WIZARD */}
+            <div className="p-10 lg:border-r border-pc-border flex flex-col">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentStep}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col flex-1"
+                >
+                  <div className="mb-6">
+                    <div className="font-mono text-[11px] text-pc-accent tracking-widest uppercase mb-2">
+                      {step.tag}
+                    </div>
+                    <h2 className="text-3xl font-bold tracking-tight mb-1.5">
+                      {step.title}
+                    </h2>
+                    <p className="text-[13px] text-pc-muted font-mono font-light">
+                      {step.subtitle}
+                    </p>
+                  </div>
+
+                  <div className="bg-pc-bg2 border border-pc-border border-l-2 border-l-pc-accent rounded-r-lg p-5 mb-6">
+                    <div className="font-mono text-[10px] tracking-widest text-pc-accent uppercase mb-1.5">
+                      Why this matters
+                    </div>
+                    <p className="text-[13px] text-pc-muted leading-relaxed font-mono font-light">
+                      {step.why}
+                    </p>
+                  </div>
+
+                  <div className="bg-pc-bg3 border border-pc-border2 rounded-lg p-4 mb-6">
+                    <div className="font-mono text-[10px] text-pc-hint tracking-widest uppercase mb-1.5">
+                      Example
+                    </div>
+                    <p className="text-[12px] text-pc-accent2 leading-relaxed font-mono">
+                      {step.example}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="font-mono text-[11px] text-pc-muted tracking-widest uppercase">
+                      {step.id === "example" ? "PASTE AN EXAMPLE OUTPUT (optional) →" : `DEFINE THE ${step.id.toUpperCase()} →`}
+                    </div>
+                    <textarea
+                      value={promptData[step.id as keyof PromptData]}
+                      onChange={(e) => handleInputChange(step.id as keyof PromptData, e.target.value)}
+                      rows={step.id === "role" || step.id === "format" || step.id === "constraints" ? 3 : 4}
+                      placeholder={step.placeholder}
+                      className="w-full bg-pc-bg2 border border-pc-border2 rounded-lg p-4 font-mono text-[13px] text-pc-text outline-none focus:border-pc-accent transition-colors resize-none leading-relaxed"
+                    />
+                    
+                    {step.chips.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {step.chips.map((chip, i) => (
+                          <button
+                            key={i}
+                            onClick={() => insertChip(step.id as keyof PromptData, chip)}
+                            className="font-mono text-[11px] px-2.5 py-1 rounded-md border border-pc-border2 text-pc-muted hover:border-pc-accent hover:text-pc-accent hover:bg-pc-accent/5 transition-all"
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-auto pt-8 flex items-center justify-between">
+                    {currentStep > 0 ? (
+                      <button 
+                        onClick={() => setCurrentStep(prev => prev - 1)}
+                        className="font-mono text-[12px] text-pc-muted hover:text-pc-text transition-colors"
+                      >
+                        ← Back
+                      </button>
+                    ) : <div />}
+
+                    {currentStep < STEPS.length - 1 ? (
+                      <button 
+                        onClick={() => setCurrentStep(prev => prev + 1)}
+                        className="bg-pc-accent text-white font-medium text-[13px] px-7 py-2.5 rounded-lg hover:bg-[#5a52e0] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2"
+                      >
+                        Next — {STEPS[currentStep + 1].id.charAt(0).toUpperCase() + STEPS[currentStep + 1].id.slice(1)} →
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={gradePrompt}
+                        disabled={isGrading}
+                        className="bg-pc-accent2 text-pc-bg font-medium text-[13px] px-7 py-2.5 rounded-lg hover:bg-[#22c55e] hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                      >
+                        {isGrading ? "Grading..." : "Grade my prompt ↗"}
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            {/* RIGHT: PREVIEW + SCORE */}
+            <div className="bg-pc-bg2 p-8 flex flex-col gap-5">
+              <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">
+                // live prompt preview
+              </div>
+
+              <div className="bg-pc-bg border border-pc-border rounded-xl p-5 flex-1 overflow-y-auto max-h-[400px] lg:max-h-none">
+                {STEPS.map((s, i) => {
+                  const val = promptData[s.id as keyof PromptData];
+                  if (s.id === "example" && !val) return null;
+                  
+                  return (
+                    <div key={s.id} className="mb-4 animate-fade-in">
+                      <div className="font-mono text-[10px] text-pc-accent tracking-widest uppercase mb-1">
+                        ## {s.id === "format" ? "Output format" : s.id === "example" ? "Example output" : s.id.charAt(0).toUpperCase() + s.id.slice(1)}
+                      </div>
+                      <div className={`font-mono text-[12px] leading-relaxed whitespace-pre-wrap ${!val ? "text-pc-hint italic" : "text-pc-text"}`}>
+                        {val || `waiting for step ${i + 1}...`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <button 
+                  onClick={() => {
+                    const name = prompt("Enter a name for this template:");
+                    if (name) saveAsTemplate(name, "Custom template");
+                  }}
+                  className="font-mono text-[10px] text-pc-hint border border-pc-border rounded-md px-2 py-1 hover:border-pc-accent hover:text-pc-accent transition-all flex items-center gap-1.5"
+                >
+                  <Zap size={10} /> save as template
+                </button>
+                <button 
+                  onClick={copyPrompt}
+                  className="font-mono text-[10px] text-pc-hint border border-pc-border rounded-md px-2 py-1 hover:border-pc-accent hover:text-pc-accent transition-all"
+                >
+                  {copied ? "copied!" : "copy prompt"}
+                </button>
+              </div>
+
+              {/* SCORE PANEL */}
+              <AnimatePresence>
+                {isGrading && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex items-center gap-2 font-mono text-[12px] text-pc-muted py-2"
+                  >
+                    <div className="w-3.5 h-3.5 border-2 border-pc-border2 border-t-pc-accent rounded-full animate-pc-spin" />
+                    <span>Gemini is grading...</span>
+                  </motion.div>
+                )}
+
+                {error && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 bg-pc-red/10 border border-pc-red/20 text-pc-red rounded-lg text-[11px] font-mono flex items-start gap-2"
+                  >
+                    <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                    {error}
+                  </motion.div>
+                )}
+
+                {result && !isGrading && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-pc-bg3 border border-pc-border rounded-xl p-5 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-baseline gap-2">
+                        <span className={`text-4xl font-bold font-mono leading-none ${getScoreColorClass(result.overall_score)}`}>
+                          {result.overall_score}
+                        </span>
+                        <span className="text-[13px] font-mono text-pc-muted">
+                          / 100 · {result.grade}
+                        </span>
+                      </div>
+                      <button
+                        onClick={saveToLibrary}
+                        className="flex items-center gap-1.5 font-mono text-[10px] text-pc-accent border border-pc-accent/20 px-2.5 py-1.5 rounded-lg hover:bg-pc-accent/10 transition-all"
+                      >
+                        <Bookmark size={12} /> Save to Library
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      {dimensions.map((dim) => (
+                        <div key={dim.id} className="space-y-1.5">
+                          <div className="flex items-center justify-between font-mono text-[11px]">
+                            <span className="text-pc-muted">{dim.label}</span>
+                            <span className="text-pc-text">{result[dim.id]}</span>
+                          </div>
+                          <div className="h-[3px] bg-pc-bg4 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${result[dim.id]}%` }}
+                              transition={{ duration: 0.8, ease: "easeOut" }}
+                              className={`h-full rounded-full ${getBarColor(result[dim.id] as number)}`}
+                            />
+                          </div>
+                          <div className="bg-pc-bg4/30 rounded p-2 mt-1">
+                            <div className="text-[9px] font-bold text-pc-hint uppercase tracking-wider mb-1">Feedback</div>
+                            <p className="text-[11px] text-pc-muted font-mono leading-relaxed">
+                              {result[`${dim.id}_rationale`]}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="bg-pc-bg2 border-l-2 border-l-pc-amber rounded-r-md p-3">
+                      <div className="font-mono text-[10px] text-pc-amber tracking-widest uppercase mb-1">
+                        Verdict
+                      </div>
+                      <p className="font-mono text-[11px] text-pc-muted leading-relaxed">
+                        {result.one_line_verdict}
+                      </p>
+                    </div>
+
+                    <div className="bg-pc-bg2 border-l-2 border-l-pc-accent2 rounded-r-md p-3">
+                      <div className="font-mono text-[10px] text-pc-accent2 tracking-widest uppercase mb-1">
+                        Top fix
+                      </div>
+                      <p className="font-mono text-[11px] text-pc-muted leading-relaxed">
+                        {result.top_fix}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        ) : (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-10 flex flex-col gap-8"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight mb-1.5 flex items-center gap-3">
+                  <Terminal className="text-pc-accent" /> Prompt Tester
+                </h2>
+                <p className="text-[13px] text-pc-muted font-mono font-light">
+                  Execute your prompt with different variables to verify performance.
                 </p>
+              </div>
+              <button 
+                onClick={addTestCase}
+                className="bg-pc-bg3 border border-pc-border2 text-pc-text font-mono text-[12px] px-4 py-2 rounded-lg hover:border-pc-accent transition-all flex items-center gap-2"
+              >
+                <Plus size={14} /> Add Test Case
+              </button>
+              <button 
+                onClick={runAllTests}
+                disabled={testCases.some(tc => tc.isLoading)}
+                className="bg-pc-accent text-white font-mono text-[12px] px-4 py-2 rounded-lg hover:opacity-90 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                <Play size={14} /> Run All Tests
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-8">
+              {/* PROMPT PREVIEW */}
+              <div className="space-y-4">
+                <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase flex items-center justify-between">
+                  <span>Current Prompt</span>
+                  <button onClick={copyPrompt} className="hover:text-pc-accent transition-colors flex items-center gap-1">
+                    <Copy size={10} /> copy
+                  </button>
+                </div>
+                <div className="bg-pc-bg2 border border-pc-border rounded-xl p-5 font-mono text-[12px] text-pc-muted whitespace-pre-wrap max-h-[600px] overflow-y-auto leading-relaxed">
+                  {buildFullPrompt() || "No prompt content yet. Go back to builder to add details."}
+                </div>
+                
+                {detectVariables(buildFullPrompt()).length > 0 && (
+                  <div className="bg-pc-accent/5 border border-pc-accent/20 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Variable size={14} className="text-pc-accent" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-pc-accent">Detected Variables</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {detectVariables(buildFullPrompt()).map(v => (
+                        <span key={v} className="bg-pc-bg3 border border-pc-border2 px-2 py-1 rounded text-[10px] font-mono text-pc-text">
+                          {`{{${v}}}`}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* TEST CASES */}
+              <div className="space-y-6">
+                {testCases.map((tc, idx) => {
+                  const vars = detectVariables(buildFullPrompt());
+                  return (
+                    <div key={tc.id} className="bg-pc-bg2 border border-pc-border rounded-2xl overflow-hidden shadow-sm">
+                      <div className="bg-pc-bg3 px-6 py-3 border-b border-pc-border flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="bg-pc-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold font-mono">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-[12px] uppercase tracking-widest">Test Case</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => runTest(tc.id)}
+                            disabled={tc.isLoading}
+                            className="bg-pc-accent text-white font-mono text-[11px] px-4 py-1.5 rounded-lg hover:opacity-90 transition-all flex items-center gap-2 disabled:opacity-50"
+                          >
+                            {tc.isLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                            {tc.isLoading ? "Running..." : "Run Test"}
+                          </button>
+                          <button 
+                            onClick={() => removeTestCase(tc.id)}
+                            className="p-1.5 text-pc-hint hover:text-pc-red transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* INPUTS */}
+                        <div className="space-y-4">
+                          <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">Inputs</div>
+                          {vars.length === 0 ? (
+                            <div className="text-[11px] text-pc-hint font-mono italic p-4 bg-pc-bg/50 border border-dashed border-pc-border2 rounded-lg">
+                              No variables detected. Use {"{{variable}}"} syntax in your prompt to define inputs.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {vars.map(v => (
+                                <div key={v} className="space-y-1.5">
+                                  <label className="block font-mono text-[10px] text-pc-muted uppercase">{v}</label>
+                                  <textarea 
+                                    value={tc.variables[v] || ""}
+                                    onChange={(e) => updateTestCaseVariable(tc.id, v, e.target.value)}
+                                    className="w-full bg-pc-bg border border-pc-border2 rounded-lg p-3 font-mono text-[12px] text-pc-text outline-none focus:border-pc-accent transition-colors resize-none"
+                                    rows={2}
+                                    placeholder={`Value for {{${v}}}`}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* EXPECTED OUTPUT */}
+                        <div className="space-y-4">
+                          <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">Expected Output</div>
+                          <textarea 
+                            value={tc.expectedOutput || ""}
+                            onChange={(e) => updateTestCaseExpected(tc.id, e.target.value)}
+                            className="w-full bg-pc-bg border border-pc-border2 rounded-lg p-3 font-mono text-[12px] text-pc-text outline-none focus:border-pc-accent transition-colors resize-none h-[200px]"
+                            placeholder="What do you expect the model to return?"
+                          />
+                        </div>
+
+                        {/* OUTPUT */}
+                        <div className="space-y-4">
+                          <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span>Output</span>
+                              {tc.output && tc.expectedOutput && (
+                                <button 
+                                  onClick={() => toggleTestCaseDiff(tc.id)}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${tc.showDiff ? "bg-pc-accent/10 border-pc-accent text-pc-accent" : "border-pc-border2 text-pc-hint hover:border-pc-accent"}`}
+                                >
+                                  DIFF
+                                </button>
+                              )}
+                            </div>
+                            {tc.output && (
+                              <button 
+                                onClick={() => {
+                                  navigator.clipboard.writeText(tc.output);
+                                }}
+                                className="hover:text-pc-accent transition-colors"
+                              >
+                                <Copy size={12} />
+                              </button>
+                            )}
+                          </div>
+                          <div className={`w-full min-h-[120px] bg-pc-bg border border-pc-border2 rounded-lg p-4 font-mono text-[12px] leading-relaxed overflow-y-auto max-h-[300px] ${tc.error ? "text-pc-red bg-pc-red/5 border-pc-red/20" : tc.output ? "text-pc-text" : "text-pc-hint italic"}`}>
+                            {tc.isLoading ? (
+                              <div className="flex flex-col items-center justify-center h-full gap-3 py-8">
+                                <Loader2 size={24} className="animate-spin text-pc-accent" />
+                                <span className="animate-pulse">Generating response...</span>
+                              </div>
+                            ) : tc.error ? (
+                              <div className="flex items-start gap-2">
+                                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                                <span>{tc.error}</span>
+                              </div>
+                            ) : tc.output ? (
+                              tc.showDiff && tc.expectedOutput ? (
+                                <DiffViewer expected={tc.expectedOutput} actual={tc.output} />
+                              ) : (
+                                <div className="whitespace-pre-wrap">{tc.output}</div>
+                              )
+                            ) : (
+                              "Run test to see output..."
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {testCases.length > 0 && (
+                  <div className="flex justify-center pt-4">
+                    <button 
+                      onClick={() => {
+                        if (confirm("Reset all test cases?")) {
+                          setTestCases([{ id: crypto.randomUUID(), variables: {}, output: "", isLoading: false, error: null }]);
+                        }
+                      }}
+                      className="text-pc-hint hover:text-pc-red font-mono text-[11px] flex items-center gap-2 transition-colors"
+                    >
+                      <RotateCcw size={12} /> Reset all tests
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
         )}
-
-        {/* CENTER: WIZARD */}
-        <div className="p-10 lg:border-r border-pc-border flex flex-col">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentStep}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.2 }}
-              className="flex flex-col flex-1"
-            >
-              <div className="mb-6">
-                <div className="font-mono text-[11px] text-pc-accent tracking-widest uppercase mb-2">
-                  {step.tag}
-                </div>
-                <h2 className="text-3xl font-bold tracking-tight mb-1.5">
-                  {step.title}
-                </h2>
-                <p className="text-[13px] text-pc-muted font-mono font-light">
-                  {step.subtitle}
-                </p>
-              </div>
-
-              <div className="bg-pc-bg2 border border-pc-border border-l-2 border-l-pc-accent rounded-r-lg p-5 mb-6">
-                <div className="font-mono text-[10px] tracking-widest text-pc-accent uppercase mb-1.5">
-                  Why this matters
-                </div>
-                <p className="text-[13px] text-pc-muted leading-relaxed font-mono font-light">
-                  {step.why}
-                </p>
-              </div>
-
-              <div className="bg-pc-bg3 border border-pc-border2 rounded-lg p-4 mb-6">
-                <div className="font-mono text-[10px] text-pc-hint tracking-widest uppercase mb-1.5">
-                  Example
-                </div>
-                <p className="text-[12px] text-pc-accent2 leading-relaxed font-mono">
-                  {step.example}
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="font-mono text-[11px] text-pc-muted tracking-widest uppercase">
-                  {step.id === "example" ? "PASTE AN EXAMPLE OUTPUT (optional) →" : `DEFINE THE ${step.id.toUpperCase()} →`}
-                </div>
-                <textarea
-                  value={promptData[step.id as keyof PromptData]}
-                  onChange={(e) => handleInputChange(step.id as keyof PromptData, e.target.value)}
-                  rows={step.id === "role" || step.id === "format" || step.id === "constraints" ? 3 : 4}
-                  placeholder={step.placeholder}
-                  className="w-full bg-pc-bg2 border border-pc-border2 rounded-lg p-4 font-mono text-[13px] text-pc-text outline-none focus:border-pc-accent transition-colors resize-none leading-relaxed"
-                />
-                
-                {step.chips.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {step.chips.map((chip, i) => (
-                      <button
-                        key={i}
-                        onClick={() => insertChip(step.id as keyof PromptData, chip)}
-                        className="font-mono text-[11px] px-2.5 py-1 rounded-md border border-pc-border2 text-pc-muted hover:border-pc-accent hover:text-pc-accent hover:bg-pc-accent/5 transition-all"
-                      >
-                        {chip}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-auto pt-8 flex items-center justify-between">
-                {currentStep > 0 ? (
-                  <button 
-                    onClick={() => setCurrentStep(prev => prev - 1)}
-                    className="font-mono text-[12px] text-pc-muted hover:text-pc-text transition-colors"
-                  >
-                    ← Back
-                  </button>
-                ) : <div />}
-
-                {currentStep < STEPS.length - 1 ? (
-                  <button 
-                    onClick={() => setCurrentStep(prev => prev + 1)}
-                    className="bg-pc-accent text-white font-medium text-[13px] px-7 py-2.5 rounded-lg hover:bg-[#5a52e0] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2"
-                  >
-                    Next — {STEPS[currentStep + 1].id.charAt(0).toUpperCase() + STEPS[currentStep + 1].id.slice(1)} →
-                  </button>
-                ) : (
-                  <button 
-                    onClick={gradePrompt}
-                    disabled={isGrading}
-                    className="bg-pc-accent2 text-pc-bg font-medium text-[13px] px-7 py-2.5 rounded-lg hover:bg-[#22c55e] hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-                  >
-                    {isGrading ? "Grading..." : "Grade my prompt ↗"}
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          </AnimatePresence>
-        </div>
-
-        {/* RIGHT: PREVIEW + SCORE */}
-        <div className="bg-pc-bg2 p-8 flex flex-col gap-5">
-          <div className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">
-            // live prompt preview
-          </div>
-
-          <div className="bg-pc-bg border border-pc-border rounded-xl p-5 flex-1 overflow-y-auto max-h-[400px] lg:max-h-none">
-            {STEPS.map((s, i) => {
-              const val = promptData[s.id as keyof PromptData];
-              if (s.id === "example" && !val) return null;
-              
-              return (
-                <div key={s.id} className="mb-4 animate-fade-in">
-                  <div className="font-mono text-[10px] text-pc-accent tracking-widest uppercase mb-1">
-                    ## {s.id === "format" ? "Output format" : s.id === "example" ? "Example output" : s.id.charAt(0).toUpperCase() + s.id.slice(1)}
-                  </div>
-                  <div className={`font-mono text-[12px] leading-relaxed whitespace-pre-wrap ${!val ? "text-pc-hint italic" : "text-pc-text"}`}>
-                    {val || `waiting for step ${i + 1}...`}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <button 
-            onClick={copyPrompt}
-            className="self-end font-mono text-[10px] text-pc-hint border border-pc-border rounded-md px-2 py-1 hover:border-pc-accent hover:text-pc-accent transition-all"
-          >
-            {copied ? "copied!" : "copy prompt"}
-          </button>
-
-          {/* SCORE PANEL */}
-          <AnimatePresence>
-            {isGrading && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center gap-2 font-mono text-[12px] text-pc-muted py-2"
-              >
-                <div className="w-3.5 h-3.5 border-2 border-pc-border2 border-t-pc-accent rounded-full animate-pc-spin" />
-                <span>Gemini is grading...</span>
-              </motion.div>
-            )}
-
-            {error && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-3 bg-pc-red/10 border border-pc-red/20 text-pc-red rounded-lg text-[11px] font-mono flex items-start gap-2"
-              >
-                <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                {error}
-              </motion.div>
-            )}
-
-            {result && !isGrading && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-pc-bg3 border border-pc-border rounded-xl p-5 space-y-4"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-baseline gap-2">
-                    <span className={`text-4xl font-bold font-mono leading-none ${getScoreColorClass(result.overall_score)}`}>
-                      {result.overall_score}
-                    </span>
-                    <span className="text-[13px] font-mono text-pc-muted">
-                      / 100 · {result.grade}
-                    </span>
-                  </div>
-                  <button
-                    onClick={saveToLibrary}
-                    className="flex items-center gap-1.5 font-mono text-[10px] text-pc-accent border border-pc-accent/20 px-2.5 py-1.5 rounded-lg hover:bg-pc-accent/10 transition-all"
-                  >
-                    <Bookmark size={12} /> Save to Library
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {dimensions.map((dim) => (
-                    <div key={dim.id} className="space-y-1.5">
-                      <div className="flex items-center justify-between font-mono text-[11px]">
-                        <span className="text-pc-muted">{dim.label}</span>
-                        <span className="text-pc-text">{result[dim.id]}</span>
-                      </div>
-                      <div className="h-[3px] bg-pc-bg4 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${result[dim.id]}%` }}
-                          transition={{ duration: 0.8, ease: "easeOut" }}
-                          className={`h-full rounded-full ${getBarColor(result[dim.id] as number)}`}
-                        />
-                      </div>
-                      <div className="bg-pc-bg4/30 rounded p-2 mt-1">
-                        <div className="text-[9px] font-bold text-pc-hint uppercase tracking-wider mb-1">Feedback</div>
-                        <p className="text-[11px] text-pc-muted font-mono leading-relaxed">
-                          {result[`${dim.id}_rationale`]}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="bg-pc-bg2 border-l-2 border-l-pc-amber rounded-r-md p-3">
-                  <div className="font-mono text-[10px] text-pc-amber tracking-widest uppercase mb-1">
-                    Verdict
-                  </div>
-                  <p className="font-mono text-[11px] text-pc-muted leading-relaxed">
-                    {result.one_line_verdict}
-                  </p>
-                </div>
-
-                <div className="bg-pc-bg2 border-l-2 border-l-pc-accent2 rounded-r-md p-3">
-                  <div className="font-mono text-[10px] text-pc-accent2 tracking-widest uppercase mb-1">
-                    Top fix
-                  </div>
-                  <p className="font-mono text-[11px] text-pc-muted leading-relaxed">
-                    {result.top_fix}
-                  </p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
       </div>
 
       {/* HISTORY MODAL */}
@@ -854,8 +1373,8 @@ export default function App() {
                     history.map((item) => (
                       <div 
                         key={item.id}
-                        onClick={() => loadHistoryItem(item)}
-                        className="group bg-pc-bg3 border border-pc-border2 rounded-xl p-4 hover:border-pc-accent transition-all cursor-pointer relative"
+                        onClick={() => loadHistoryItem(item, "history")}
+                        className={`group bg-pc-bg3 border rounded-xl p-4 transition-all cursor-pointer relative ${activeItemId === item.id ? "border-pc-accent" : "border-pc-border2 hover:border-pc-accent"}`}
                       >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
@@ -891,31 +1410,64 @@ export default function App() {
                     savedItems.map((item) => (
                       <div 
                         key={item.id}
-                        onClick={() => loadHistoryItem(item)}
-                        className="group bg-pc-bg3 border border-pc-border2 rounded-xl p-4 hover:border-pc-accent transition-all cursor-pointer relative"
+                        className={`group bg-pc-bg3 border rounded-xl p-4 transition-all relative ${activeItemId === item.id ? "border-pc-accent" : "border-pc-border2 hover:border-pc-accent"}`}
                       >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-3">
-                            <span className={`text-xl font-bold font-mono ${getScoreColorClass(item.result.overall_score)}`}>
-                              {item.result.overall_score}
-                            </span>
-                            <div className="flex flex-col">
-                              <span className="text-[12px] font-bold">{item.result.grade}</span>
-                              <span className="text-[10px] text-pc-hint font-mono">
-                                {new Date(item.timestamp).toLocaleString()}
+                        <div 
+                          onClick={() => loadHistoryItem(item, "library")}
+                          className="cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                              <span className={`text-xl font-bold font-mono ${getScoreColorClass(item.result.overall_score)}`}>
+                                {item.result.overall_score}
                               </span>
+                              <div className="flex flex-col">
+                                <span className="text-[12px] font-bold">{item.result.grade}</span>
+                                <span className="text-[10px] text-pc-hint font-mono">
+                                  {new Date(item.timestamp).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={(e) => deleteHistoryItem(item.id, e, "library")}
+                              className="p-2 text-pc-hint hover:text-pc-red hover:bg-pc-red/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-pc-muted font-mono line-clamp-2 italic mb-3">
+                            "{item.result.one_line_verdict}"
+                          </p>
+                        </div>
+
+                        {/* Versions */}
+                        {item.versions && item.versions.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-pc-border space-y-2">
+                            <div className="flex items-center gap-2 mb-2">
+                              <RotateCcw size={12} className="text-pc-hint" />
+                              <span className="text-[9px] font-mono text-pc-hint uppercase tracking-widest">Version History</span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {item.versions.map((v) => (
+                                <div 
+                                  key={v.id}
+                                  onClick={() => loadHistoryItem(v, "library")}
+                                  className="flex items-center justify-between p-2 rounded bg-pc-bg/50 hover:bg-pc-bg transition-all cursor-pointer group/v"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[11px] font-bold font-mono ${getScoreColorClass(v.result.overall_score)}`}>
+                                      {v.result.overall_score}
+                                    </span>
+                                    <span className="text-[9px] text-pc-hint font-mono">
+                                      {new Date(v.timestamp).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9px] text-pc-accent opacity-0 group-hover/v:opacity-100 transition-all font-mono">REVERT</span>
+                                </div>
+                              ))}
                             </div>
                           </div>
-                          <button 
-                            onClick={(e) => deleteHistoryItem(item.id, e, "library")}
-                            className="p-2 text-pc-hint hover:text-pc-red hover:bg-pc-red/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-pc-muted font-mono line-clamp-2 italic">
-                          "{item.result.one_line_verdict}"
-                        </p>
+                        )}
                       </div>
                     ))
                   )
@@ -1048,6 +1600,309 @@ export default function App() {
                   className="px-6 py-2 bg-pc-accent text-pc-bg font-bold rounded-xl hover:opacity-90 transition-all flex items-center gap-2"
                 >
                   <Save size={16} /> Save Changes
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Templates Modal */}
+      <AnimatePresence>
+        {showTemplates && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowTemplates(false)}
+              className="absolute inset-0 bg-pc-bg/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-4xl bg-pc-bg2 border border-pc-border rounded-2xl shadow-2xl flex flex-col max-h-[85vh] relative z-10"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-pc-border">
+                <div className="flex items-center gap-2">
+                  <Zap className="text-pc-accent" size={20} />
+                  <h3 className="text-xl font-bold">Prompt Templates</h3>
+                </div>
+                <button 
+                  onClick={() => setShowTemplates(false)}
+                  className="p-2 hover:bg-pc-bg3 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                {/* Predefined Templates */}
+                <div className="space-y-4">
+                  <h4 className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">Predefined Blueprints</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {PREDEFINED_TEMPLATES.map(template => (
+                      <div 
+                        key={template.id}
+                        onClick={() => loadHistoryItem(template, "template")}
+                        className="group bg-pc-bg3 border border-pc-border2 rounded-xl p-5 hover:border-pc-accent transition-all cursor-pointer relative"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-mono text-pc-accent uppercase tracking-wider mb-1">{template.category}</span>
+                            <span className="text-[14px] font-bold">{template.name}</span>
+                          </div>
+                          <ChevronRight size={16} className="text-pc-hint group-hover:text-pc-accent transition-colors" />
+                        </div>
+                        <p className="text-[11px] text-pc-muted leading-relaxed line-clamp-2">
+                          {template.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Templates */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-mono text-[10px] tracking-widest text-pc-hint uppercase">Your Custom Templates</h4>
+                    {customTemplates.length > 0 && (
+                      <button 
+                        onClick={() => {
+                          if (confirm("Clear all custom templates?")) {
+                            setCustomTemplates([]);
+                            localStorage.removeItem("promptcraft_custom_templates");
+                          }
+                        }}
+                        className="font-mono text-[9px] text-pc-red uppercase tracking-widest hover:underline"
+                      >
+                        clear all
+                      </button>
+                    )}
+                  </div>
+                  
+                  {customTemplates.length === 0 ? (
+                    <div className="bg-pc-bg/30 border border-dashed border-pc-border2 rounded-xl p-8 text-center">
+                      <p className="text-[12px] text-pc-hint font-mono">
+                        No custom templates yet. Save your current prompt as a template to see it here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {customTemplates.map(template => (
+                        <div 
+                          key={template.id}
+                          className={`group bg-pc-bg3 border rounded-xl p-5 transition-all relative ${activeItemId === template.id ? "border-pc-accent" : "border-pc-border2 hover:border-pc-accent"}`}
+                        >
+                          <div 
+                            onClick={() => loadHistoryItem(template, "template")}
+                            className="cursor-pointer"
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex flex-col">
+                                <span className="text-[14px] font-bold">{template.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={(e) => deleteCustomTemplate(template.id, e)}
+                                  className="p-1.5 text-pc-hint hover:text-pc-red transition-colors opacity-0 group-hover:opacity-100"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                                <ChevronRight size={16} className="text-pc-hint group-hover:text-pc-accent transition-colors" />
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-pc-muted leading-relaxed line-clamp-2 mb-3">
+                              {template.description}
+                            </p>
+                          </div>
+
+                          {/* Versions */}
+                          {template.versions && template.versions.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-pc-border space-y-2">
+                              <div className="flex items-center gap-2 mb-2">
+                                <RotateCcw size={12} className="text-pc-hint" />
+                                <span className="text-[9px] font-mono text-pc-hint uppercase tracking-widest">Version History</span>
+                              </div>
+                              <div className="space-y-1.5">
+                                {template.versions.map((v) => (
+                                  <div 
+                                    key={v.id}
+                                    onClick={() => loadHistoryItem(v, "template")}
+                                    className="flex items-center justify-between p-2 rounded bg-pc-bg/50 hover:bg-pc-bg transition-all cursor-pointer group/v"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[9px] text-pc-hint font-mono">
+                                        {new Date(v.timestamp).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <span className="text-[9px] text-pc-accent opacity-0 group-hover/v:opacity-100 transition-all font-mono">REVERT</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-pc-border bg-pc-bg/30">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center gap-2">
+                    <Save size={14} className="text-pc-accent" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Save Current as Template</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.5fr_auto] gap-3">
+                    <input 
+                      id="tpl-name"
+                      type="text"
+                      placeholder="Template Name (e.g. Blog Post Draft)"
+                      className="bg-pc-bg border border-pc-border2 rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-pc-accent transition-all"
+                    />
+                    <input 
+                      id="tpl-desc"
+                      type="text"
+                      placeholder="Short description..."
+                      className="bg-pc-bg border border-pc-border2 rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-pc-accent transition-all"
+                    />
+                    <button 
+                      onClick={() => {
+                        const name = (document.getElementById('tpl-name') as HTMLInputElement).value;
+                        const desc = (document.getElementById('tpl-desc') as HTMLInputElement).value;
+                        if (!name) return alert("Please enter a template name.");
+                        saveAsTemplate(name, desc);
+                        (document.getElementById('tpl-name') as HTMLInputElement).value = "";
+                        (document.getElementById('tpl-desc') as HTMLInputElement).value = "";
+                      }}
+                      className="bg-pc-accent text-pc-bg px-6 py-2 rounded-lg font-bold text-[12px] hover:opacity-90 transition-all"
+                    >
+                      Save Template
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* User Manual Modal */}
+      <AnimatePresence>
+        {showManual && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowManual(false)}
+              className="absolute inset-0 bg-pc-bg/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-3xl bg-pc-bg2 border border-pc-border rounded-2xl shadow-2xl flex flex-col max-h-[85vh] relative z-10"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-pc-border">
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="text-pc-accent" size={20} />
+                  <h3 className="text-xl font-bold">PromptCraft User Manual</h3>
+                </div>
+                <button 
+                  onClick={() => setShowManual(false)}
+                  className="p-2 hover:bg-pc-bg3 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 space-y-10">
+                {/* Section 1: The Builder */}
+                <section className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-pc-accent/10 flex items-center justify-center text-pc-accent">
+                      <Layers size={18} />
+                    </div>
+                    <h4 className="text-lg font-bold">1. The Builder Mode</h4>
+                  </div>
+                  <p className="text-[13px] text-pc-muted leading-relaxed">
+                    The Builder uses a 6-step structured approach to help you craft high-performance prompts. Each step focuses on a critical dimension of prompt engineering:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {[
+                      { title: "Role", desc: "Define WHO the AI is (e.g., 'Senior Software Engineer')." },
+                      { title: "Task", desc: "Clearly state WHAT the AI should do." },
+                      { title: "Context", desc: "Provide background info and the 'Why'." },
+                      { title: "Format", desc: "Specify the structure of the output (JSON, Markdown, etc.)." },
+                      { title: "Example", desc: "Give a few-shot example of the desired output." },
+                      { title: "Constraints", desc: "Set boundaries on what NOT to do." }
+                    ].map(item => (
+                      <div key={item.title} className="bg-pc-bg3 p-3 rounded-xl border border-pc-border2">
+                        <span className="text-[11px] font-bold text-pc-accent uppercase tracking-wider block mb-1">{item.title}</span>
+                        <p className="text-[11px] text-pc-muted">{item.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Section 2: Variables */}
+                <section className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-pc-accent2/10 flex items-center justify-center text-pc-accent2">
+                      <Variable size={18} />
+                    </div>
+                    <h4 className="text-lg font-bold">2. Dynamic Variables</h4>
+                  </div>
+                  <p className="text-[13px] text-pc-muted leading-relaxed">
+                    Make your prompts reusable by using the <code className="bg-pc-bg3 px-1.5 py-0.5 rounded text-pc-accent font-mono">{"{{variable_name}}"}</code> syntax.
+                  </p>
+                  <div className="bg-pc-bg3 p-4 rounded-xl border border-pc-border2 font-mono text-[11px]">
+                    <span className="text-pc-hint">// Example:</span><br/>
+                    Summarise the following article for a <span className="text-pc-accent">{"{{target_audience}}"}</span>:<br/>
+                    <span className="text-pc-accent">{"{{article_text}}"}</span>
+                  </div>
+                  <p className="text-[12px] text-pc-hint italic">
+                    PromptCraft automatically detects these variables and generates input fields in the Tester view.
+                  </p>
+                </section>
+
+                {/* Section 3: The Tester */}
+                <section className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-pc-amber/10 flex items-center justify-center text-pc-amber">
+                      <Terminal size={18} />
+                    </div>
+                    <h4 className="text-lg font-bold">3. The Tester View</h4>
+                  </div>
+                  <p className="text-[13px] text-pc-muted leading-relaxed">
+                    Switch to the Tester to run your prompt against real inputs. You can create multiple test cases, provide values for your variables, and compare the AI's output against your "Expected Output" using the built-in <span className="font-bold">DIFF</span> tool.
+                  </p>
+                </section>
+
+                {/* Section 4: Grading & Weights */}
+                <section className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-pc-red/10 flex items-center justify-center text-pc-red">
+                      <Sliders size={18} />
+                    </div>
+                    <h4 className="text-lg font-bold">4. Grading & Custom Weights</h4>
+                  </div>
+                  <p className="text-[13px] text-pc-muted leading-relaxed">
+                    Click "Grade my prompt" to get an objective evaluation from Gemini. You can customise the grading criteria in the <span className="font-bold">Weights</span> menu. Add your own dimensions or adjust the importance of existing ones to match your specific needs.
+                  </p>
+                </section>
+              </div>
+
+              <div className="p-6 border-t border-pc-border flex justify-center">
+                <button 
+                  onClick={() => setShowManual(false)}
+                  className="px-10 py-3 bg-pc-accent text-pc-bg font-bold rounded-xl hover:opacity-90 transition-all"
+                >
+                  Got it, let's craft!
                 </button>
               </div>
             </motion.div>
