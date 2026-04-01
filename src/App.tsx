@@ -26,7 +26,9 @@ import {
   Layers,
   HelpCircle,
   Copy,
-  RotateCcw
+  RotateCcw,
+  Brain,
+  Shield
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as Diff from "diff";
@@ -701,7 +703,7 @@ export default function App() {
       {/* TOP BAR */}
       <div className="w-full max-w-[1100px] flex items-center justify-between px-8 py-6 border-b border-pc-border">
         <div className="text-[15px] font-bold tracking-widest">
-          PROMPTCRAFT<span className="text-pc-accent">CRAFT</span> <span className="text-pc-hint font-normal">/ builder</span>
+          WIZARD<span className="text-pc-accent">PROMPT</span> <span className="text-pc-hint font-normal">/ builder</span>
         </div>
         
         <div className="flex items-center gap-1.5">
