@@ -306,6 +306,7 @@ export default function App() {
   const [showRoadmap, setShowRoadmap] = useState(true);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [manualTab, setManualTab] = useState<"guide" | "roadmap">("guide");
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
   const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([]);
@@ -759,7 +760,7 @@ export default function App() {
             onClick={() => setShowManual(true)}
             className="font-mono text-[11px] text-pc-hint border border-pc-border rounded-md px-3 py-1.5 hover:border-pc-border2 hover:text-pc-muted transition-all flex items-center gap-2"
           >
-            <HelpCircle size={14} /> guide
+            <Compass size={14} /> guide & roadmap
           </button>
           <button 
             onClick={resetWizard}
@@ -1808,9 +1809,21 @@ export default function App() {
               className="w-full max-w-3xl bg-pc-bg2 border border-pc-border rounded-2xl shadow-2xl flex flex-col max-h-[85vh] relative z-10"
             >
               <div className="flex items-center justify-between p-6 border-b border-pc-border">
-                <div className="flex items-center gap-2">
-                  <HelpCircle className="text-pc-accent" size={20} />
-                  <h3 className="text-xl font-bold">PromptCraft User Manual</h3>
+                <div className="flex items-center gap-6">
+                  <button 
+                    onClick={() => setManualTab("guide")}
+                    className={`flex items-center gap-2 pb-1 border-b-2 transition-all ${manualTab === "guide" ? "border-pc-accent text-pc-text" : "border-transparent text-pc-hint hover:text-pc-muted"}`}
+                  >
+                    <HelpCircle size={18} />
+                    <span className="text-lg font-bold">User Manual</span>
+                  </button>
+                  <button 
+                    onClick={() => setManualTab("roadmap")}
+                    className={`flex items-center gap-2 pb-1 border-b-2 transition-all ${manualTab === "roadmap" ? "border-pc-accent text-pc-text" : "border-transparent text-pc-hint hover:text-pc-muted"}`}
+                  >
+                    <Compass size={18} />
+                    <span className="text-lg font-bold">PE Roadmap</span>
+                  </button>
                 </div>
                 <button 
                   onClick={() => setShowManual(false)}
@@ -1820,81 +1833,157 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-8 space-y-10">
-                {/* Section 1: The Builder */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-pc-accent/10 flex items-center justify-center text-pc-accent">
-                      <Layers size={18} />
-                    </div>
-                    <h4 className="text-lg font-bold">1. The Builder Mode</h4>
-                  </div>
-                  <p className="text-[13px] text-pc-muted leading-relaxed">
-                    The Builder uses a 6-step structured approach to help you craft high-performance prompts. Each step focuses on a critical dimension of prompt engineering:
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {[
-                      { title: "Role", desc: "Define WHO the AI is (e.g., 'Senior Software Engineer')." },
-                      { title: "Task", desc: "Clearly state WHAT the AI should do." },
-                      { title: "Context", desc: "Provide background info and the 'Why'." },
-                      { title: "Format", desc: "Specify the structure of the output (JSON, Markdown, etc.)." },
-                      { title: "Example", desc: "Give a few-shot example of the desired output." },
-                      { title: "Constraints", desc: "Set boundaries on what NOT to do." }
-                    ].map(item => (
-                      <div key={item.title} className="bg-pc-bg3 p-3 rounded-xl border border-pc-border2">
-                        <span className="text-[11px] font-bold text-pc-accent uppercase tracking-wider block mb-1">{item.title}</span>
-                        <p className="text-[11px] text-pc-muted">{item.desc}</p>
+              <div className="flex-1 overflow-y-auto p-8">
+                {manualTab === "guide" ? (
+                  <div className="space-y-10">
+                    {/* Section 1: The Builder */}
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-pc-accent/10 flex items-center justify-center text-pc-accent">
+                          <Layers size={18} />
+                        </div>
+                        <h4 className="text-lg font-bold">1. The Builder Mode</h4>
                       </div>
-                    ))}
-                  </div>
-                </section>
+                      <p className="text-[13px] text-pc-muted leading-relaxed">
+                        The Builder uses a 6-step structured approach to help you craft high-performance prompts. Each step focuses on a critical dimension of prompt engineering:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {[
+                          { title: "Role", desc: "Define WHO the AI is (e.g., 'Senior Software Engineer')." },
+                          { title: "Task", desc: "Clearly state WHAT the AI should do." },
+                          { title: "Context", desc: "Provide background info and the 'Why'." },
+                          { title: "Format", desc: "Specify the structure of the output (JSON, Markdown, etc.)." },
+                          { title: "Example", desc: "Give a few-shot example of the desired output." },
+                          { title: "Constraints", desc: "Set boundaries on what NOT to do." }
+                        ].map(item => (
+                          <div key={item.title} className="bg-pc-bg3 p-3 rounded-xl border border-pc-border2">
+                            <span className="text-[11px] font-bold text-pc-accent uppercase tracking-wider block mb-1">{item.title}</span>
+                            <p className="text-[11px] text-pc-muted">{item.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
 
-                {/* Section 2: Variables */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-pc-accent2/10 flex items-center justify-center text-pc-accent2">
-                      <Variable size={18} />
-                    </div>
-                    <h4 className="text-lg font-bold">2. Dynamic Variables</h4>
-                  </div>
-                  <p className="text-[13px] text-pc-muted leading-relaxed">
-                    Make your prompts reusable by using the <code className="bg-pc-bg3 px-1.5 py-0.5 rounded text-pc-accent font-mono">{"{{variable_name}}"}</code> syntax.
-                  </p>
-                  <div className="bg-pc-bg3 p-4 rounded-xl border border-pc-border2 font-mono text-[11px]">
-                    <span className="text-pc-hint">// Example:</span><br/>
-                    Summarise the following article for a <span className="text-pc-accent">{"{{target_audience}}"}</span>:<br/>
-                    <span className="text-pc-accent">{"{{article_text}}"}</span>
-                  </div>
-                  <p className="text-[12px] text-pc-hint italic">
-                    PromptCraft automatically detects these variables and generates input fields in the Tester view.
-                  </p>
-                </section>
+                    {/* Section 2: Variables */}
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-pc-accent2/10 flex items-center justify-center text-pc-accent2">
+                          <Variable size={18} />
+                        </div>
+                        <h4 className="text-lg font-bold">2. Dynamic Variables</h4>
+                      </div>
+                      <p className="text-[13px] text-pc-muted leading-relaxed">
+                        Make your prompts reusable by using the <code className="bg-pc-bg3 px-1.5 py-0.5 rounded text-pc-accent font-mono">{"{{variable_name}}"}</code> syntax.
+                      </p>
+                      <div className="bg-pc-bg3 p-4 rounded-xl border border-pc-border2 font-mono text-[11px]">
+                        <span className="text-pc-hint">// Example:</span><br/>
+                        Summarise the following article for a <span className="text-pc-accent">{"{{target_audience}}"}</span>:<br/>
+                        <span className="text-pc-accent">{"{{article_text}}"}</span>
+                      </div>
+                      <p className="text-[12px] text-pc-hint italic">
+                        PromptCraft automatically detects these variables and generates input fields in the Tester view.
+                      </p>
+                    </section>
 
-                {/* Section 3: The Tester */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-pc-amber/10 flex items-center justify-center text-pc-amber">
-                      <Terminal size={18} />
-                    </div>
-                    <h4 className="text-lg font-bold">3. The Tester View</h4>
-                  </div>
-                  <p className="text-[13px] text-pc-muted leading-relaxed">
-                    Switch to the Tester to run your prompt against real inputs. You can create multiple test cases, provide values for your variables, and compare the AI's output against your "Expected Output" using the built-in <span className="font-bold">DIFF</span> tool.
-                  </p>
-                </section>
+                    {/* Section 3: The Tester */}
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-pc-amber/10 flex items-center justify-center text-pc-amber">
+                          <Terminal size={18} />
+                        </div>
+                        <h4 className="text-lg font-bold">3. The Tester View</h4>
+                      </div>
+                      <p className="text-[13px] text-pc-muted leading-relaxed">
+                        Switch to the Tester to run your prompt against real inputs. You can create multiple test cases, provide values for your variables, and compare the AI's output against your "Expected Output" using the built-in <span className="font-bold">DIFF</span> tool.
+                      </p>
+                    </section>
 
-                {/* Section 4: Grading & Weights */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-pc-red/10 flex items-center justify-center text-pc-red">
-                      <Sliders size={18} />
-                    </div>
-                    <h4 className="text-lg font-bold">4. Grading & Custom Weights</h4>
+                    {/* Section 4: Grading & Weights */}
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-pc-red/10 flex items-center justify-center text-pc-red">
+                          <Sliders size={18} />
+                        </div>
+                        <h4 className="text-lg font-bold">4. Grading & Custom Weights</h4>
+                      </div>
+                      <p className="text-[13px] text-pc-muted leading-relaxed">
+                        Click "Grade my prompt" to get an objective evaluation from Gemini. You can customise the grading criteria in the <span className="font-bold">Weights</span> menu. Add your own dimensions or adjust the importance of existing ones to match your specific needs.
+                      </p>
+                    </section>
                   </div>
-                  <p className="text-[13px] text-pc-muted leading-relaxed">
-                    Click "Grade my prompt" to get an objective evaluation from Gemini. You can customise the grading criteria in the <span className="font-bold">Weights</span> menu. Add your own dimensions or adjust the importance of existing ones to match your specific needs.
-                  </p>
-                </section>
+                ) : (
+                  <div className="space-y-12 py-4">
+                    <div className="text-center max-w-lg mx-auto mb-12">
+                      <h4 className="text-2xl font-bold mb-3">Prompt Engineering Roadmap</h4>
+                      <p className="text-[13px] text-pc-hint">A structured path to mastering the art of AI communication and becoming an industry-standard specialist.</p>
+                    </div>
+
+                    <div className="relative space-y-16">
+                      {/* Vertical Line */}
+                      <div className="absolute left-6 top-4 bottom-4 w-[2px] bg-pc-border2" />
+
+                      {[
+                        {
+                          step: "01",
+                          title: "Foundations & Mechanics",
+                          desc: "Understand how LLMs actually work. Learn about tokens, context windows, and the probabilistic nature of AI responses. Master the difference between completion and instruction-tuned models.",
+                          icon: <Zap size={20} />,
+                          color: "bg-pc-accent"
+                        },
+                        {
+                          step: "02",
+                          title: "Structural Architecture",
+                          desc: "Learn to build prompts as modular systems. Master the 6-pillar framework (Role, Task, Context, Format, Examples, Constraints). This is the 'grammar' of professional prompt engineering.",
+                          icon: <Layers size={20} />,
+                          color: "bg-pc-accent2"
+                        },
+                        {
+                          step: "03",
+                          title: "Advanced Reasoning Patterns",
+                          desc: "Move beyond simple instructions. Implement Chain-of-Thought (CoT) for logic, Few-Shot prompting for pattern matching, and Least-to-Most decomposition for complex problem solving.",
+                          icon: <Brain size={20} />,
+                          color: "bg-pc-amber"
+                        },
+                        {
+                          step: "04",
+                          title: "Iterative Testing & Validation",
+                          desc: "Professional engineering is about data, not vibes. Learn to create robust test suites, use dynamic variables, and objectively compare outputs using diffing and semantic similarity.",
+                          icon: <Terminal size={20} />,
+                          color: "bg-pc-accent"
+                        },
+                        {
+                          step: "05",
+                          title: "Evaluation Frameworks",
+                          desc: "Develop custom scoring systems. Learn to use LLMs as judges (LLM-as-a-Judge) to grade outputs based on specific dimensions like accuracy, tone, safety, and conciseness.",
+                          icon: <Sliders size={20} />,
+                          color: "bg-pc-red"
+                        },
+                        {
+                          step: "06",
+                          title: "Industry Standards & Security",
+                          desc: "The final level. Master prompt injection defense, cost optimization (token reduction), and building scalable prompt pipelines for production environments.",
+                          icon: <Shield size={20} />,
+                          color: "bg-pc-accent2"
+                        }
+                      ].map((item, idx) => (
+                        <div key={idx} className="relative flex gap-8 group">
+                          <div className={`w-12 h-12 rounded-2xl ${item.color} flex items-center justify-center text-pc-bg shadow-lg z-10 shrink-0 group-hover:scale-110 transition-transform`}>
+                            {item.icon}
+                          </div>
+                          <div className="space-y-2 pt-1">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-[11px] font-bold text-pc-accent">{item.step}</span>
+                              <h5 className="text-lg font-bold">{item.title}</h5>
+                            </div>
+                            <p className="text-[13px] text-pc-muted leading-relaxed max-w-xl">
+                              {item.desc}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="p-6 border-t border-pc-border flex justify-center">
