@@ -317,13 +317,12 @@ export default function App() {
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
 
   const getAIInstance = () => {
-    const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     
-    console.log("API Key check:", apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : "missing");
+    console.log("AI check:", apiKey ? "Key found" : "Key missing");
 
-    // Check if the key is missing or is a placeholder string from a failed build injection
     if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "YOUR_GEMINI_API_KEY") {
-      throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in the Secrets panel in the AI Studio UI (Settings menu).");
+      throw new Error("Gemini API Key is missing. Please ensure GEMINI_API_KEY is set in the Secrets panel.");
     }
     return new GoogleGenAI({ apiKey });
   };
