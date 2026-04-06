@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_API_KEY } from "./config";
 import { 
   Zap, 
   History, 
@@ -317,7 +318,7 @@ export default function App() {
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
 
   const getAIInstance = () => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || GEMINI_API_KEY;
     
     console.log("AI check:", apiKey ? "Key found" : "Key missing");
 
