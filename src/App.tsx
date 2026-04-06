@@ -315,6 +315,14 @@ export default function App() {
   const [showMagicFill, setShowMagicFill] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
+
+  const getAIInstance = () => {
+    const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in the Settings menu.");
+    }
+    return new GoogleGenAI({ apiKey });
+  };
   const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([]);
   const [view, setView] = useState<"builder" | "tester">("builder");
   const [testCases, setTestCases] = useState<TestCase[]>([
@@ -535,7 +543,7 @@ export default function App() {
     setResult(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = getAIInstance();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ parts: [{ text: fullPrompt }] }],
@@ -605,7 +613,7 @@ export default function App() {
     if (!magicInput.trim()) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = getAIInstance();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ parts: [{ text: `
@@ -647,7 +655,7 @@ export default function App() {
     if (!result) return;
     setIsRefining(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = getAIInstance();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ parts: [{ text: `
@@ -711,7 +719,7 @@ export default function App() {
     });
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = getAIInstance();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ parts: [{ text: finalPrompt }] }],
