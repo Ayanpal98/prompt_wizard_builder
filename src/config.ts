@@ -1,1 +1,1 @@
-export const GEMINI_API_KEY = "AIzaSyC4Mdwr3HmpmjP81f2ygmZTTE5aCgEZwHA";
+export const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";

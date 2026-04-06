@@ -318,13 +318,16 @@ export default function App() {
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
 
   const getAIInstance = () => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || GEMINI_API_KEY;
+    // Use environment variables for security. 
+    // Hardcoding keys leads to leaks and blocked keys.
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     
-    console.log("AI check:", apiKey ? "Key found" : "Key missing");
-
-    if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "YOUR_GEMINI_API_KEY") {
-      throw new Error("Gemini API Key is missing. Please ensure GEMINI_API_KEY is set in the Secrets panel.");
+    if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY" || apiKey === "undefined" || apiKey === "null") {
+      throw new Error(
+        "Gemini API Key is missing or leaked. Please set 'VITE_GEMINI_API_KEY' in your Environment Variables (Vercel) or Secrets panel (AI Studio)."
+      );
     }
+    
     return new GoogleGenAI({ apiKey });
   };
   const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([]);
