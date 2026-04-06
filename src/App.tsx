@@ -309,6 +309,10 @@ export default function App() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTab, setManualTab] = useState<"guide" | "roadmap">("guide");
+  const [isRefining, setIsRefining] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [magicInput, setMagicInput] = useState("");
+  const [showMagicFill, setShowMagicFill] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [activeItemType, setActiveItemType] = useState<"history" | "library" | "template" | null>(null);
   const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([]);
@@ -597,6 +601,81 @@ export default function App() {
     }
   };
 
+  const autoGeneratePrompt = async () => {
+    if (!magicInput.trim()) return;
+    setIsGenerating(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: `
+          User Goal: ${magicInput}
+          
+          Based on this goal, generate a high-quality prompt using the 6-pillar framework.
+          Return a JSON object with the following structure:
+          {
+            "role": "The persona the AI should adopt",
+            "context": "Background information and why this task is being done",
+            "task": "The specific action the AI should take",
+            "format": "The structure of the output",
+            "constraints": "What the AI should NOT do",
+            "example": "A short example of the desired output"
+          }
+        ` }] }],
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+      const text = response.text;
+      if (text) {
+        const generated = JSON.parse(text) as PromptData;
+        setPromptData(generated);
+        setShowMagicFill(false);
+        setMagicInput("");
+        setCurrentStep(0);
+        setResult(null);
+      }
+    } catch (err: any) {
+      console.error("Generation error:", err);
+      setError("Failed to generate prompt automatically. Please check your API key.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const autoRefinePrompt = async () => {
+    if (!result) return;
+    setIsRefining(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: `
+          Current Prompt Data: ${JSON.stringify(promptData)}
+          Evaluation Result: ${JSON.stringify(result)}
+          
+          Based on the evaluation result, specifically the 'top_fix' and 'weakest_dimension', improve the prompt data.
+          Return a JSON object with the same structure as PromptData: { role, context, task, format, constraints, example }.
+          Make sure the improvements are significant and directly address the weaknesses.
+        ` }] }],
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+      const text = response.text;
+      if (text) {
+        const refined = JSON.parse(text) as PromptData;
+        setPromptData(refined);
+        setResult(null);
+      }
+    } catch (err: any) {
+      console.error("Refinement error:", err);
+      setError("Failed to refine prompt automatically. Please check your API key.");
+    } finally {
+      setIsRefining(false);
+    }
+  };
+
   const getScoreColorClass = (score: number) => {
     if (score >= 85) return "text-pc-accent2";
     if (score >= 70) return "text-blue-400";
@@ -881,16 +960,26 @@ export default function App() {
                   transition={{ duration: 0.2 }}
                   className="flex flex-col flex-1"
                 >
-                  <div className="mb-6">
-                    <div className="font-mono text-[11px] text-pc-accent tracking-widest uppercase mb-2">
-                      {step.tag}
+                  <div className="mb-6 flex items-start justify-between">
+                    <div>
+                      <div className="font-mono text-[11px] text-pc-accent tracking-widest uppercase mb-2">
+                        {step.tag}
+                      </div>
+                      <h2 className="text-3xl font-bold tracking-tight mb-1.5">
+                        {step.title}
+                      </h2>
+                      <p className="text-[13px] text-pc-muted font-mono font-light">
+                        {step.subtitle}
+                      </p>
                     </div>
-                    <h2 className="text-3xl font-bold tracking-tight mb-1.5">
-                      {step.title}
-                    </h2>
-                    <p className="text-[13px] text-pc-muted font-mono font-light">
-                      {step.subtitle}
-                    </p>
+                    {currentStep === 0 && (
+                      <button 
+                        onClick={() => setShowMagicFill(true)}
+                        className="flex items-center gap-2 font-mono text-[10px] bg-pc-accent/10 text-pc-accent border border-pc-accent/20 px-3 py-1.5 rounded-lg hover:bg-pc-accent/20 transition-all"
+                      >
+                        <Zap size={12} /> Magic Fill
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-pc-bg2 border border-pc-border border-l-2 border-l-pc-accent rounded-r-lg p-5 mb-6">
@@ -1100,6 +1189,17 @@ export default function App() {
                       <p className="font-mono text-[11px] text-pc-muted leading-relaxed">
                         {result.top_fix}
                       </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-4">
+                      <button
+                        onClick={autoRefinePrompt}
+                        disabled={isRefining}
+                        className="flex-1 flex items-center justify-center gap-2 font-mono text-[11px] bg-pc-accent text-white py-2.5 rounded-xl hover:opacity-90 transition-all disabled:opacity-50"
+                      >
+                        {isRefining ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        Auto-Refine Prompt
+                      </button>
                     </div>
                   </motion.div>
                 )}
@@ -1603,6 +1703,58 @@ export default function App() {
                   className="px-6 py-2 bg-pc-accent text-pc-bg font-bold rounded-xl hover:opacity-90 transition-all flex items-center gap-2"
                 >
                   <Save size={16} /> Save Changes
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Magic Fill Modal */}
+      <AnimatePresence>
+        {showMagicFill && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMagicFill(false)}
+              className="absolute inset-0 bg-pc-bg/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-lg bg-pc-bg2 border border-pc-border rounded-2xl shadow-2xl flex flex-col relative z-10 p-8"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-pc-accent/10 flex items-center justify-center text-pc-accent">
+                  <Zap size={20} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">Magic Fill</h3>
+                  <p className="text-[12px] text-pc-hint font-mono">Automate the 6-pillar framework</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[13px] text-pc-muted leading-relaxed">
+                  Describe what you want the AI to do in simple words. Wizard Prompt will automatically generate the Role, Task, Context, and more.
+                </p>
+                <textarea 
+                  value={magicInput}
+                  onChange={(e) => setMagicInput(e.target.value)}
+                  placeholder="e.g. I want an AI that can help me write professional emails to my clients about project delays."
+                  rows={4}
+                  className="w-full bg-pc-bg3 border border-pc-border2 rounded-xl p-4 font-mono text-[13px] text-pc-text outline-none focus:border-pc-accent transition-colors resize-none"
+                />
+                <button 
+                  onClick={autoGeneratePrompt}
+                  disabled={isGenerating || !magicInput.trim()}
+                  className="w-full py-3 bg-pc-accent text-pc-bg font-bold rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
+                  {isGenerating ? "Generating..." : "Generate Prompt"}
                 </button>
               </div>
             </motion.div>
